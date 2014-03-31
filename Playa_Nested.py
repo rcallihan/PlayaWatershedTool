@@ -1,10 +1,9 @@
 #version fixes. Iterate through each pour point. 
-
-
-import arcpy, os, time
+import arcpy, os, time, sys, traceback, exceptions, re
 from arcpy import env
 from arcpy.sa import *
 arcpy.CheckOutExtension("Spatial")
+arcpy.CheckOutExtension("3D")
 arcpy.env.overwriteOutput = True
 
 #Get user parameters
@@ -12,25 +11,25 @@ OutputLocation = arcpy.GetParameterAsText(0)
 PlayaPolys = arcpy.GetParameterAsText(1)
 HUC_DEM = arcpy.GetParameterAsText(2)
 
-# OutputLocation = r"C:\Users\IEUser\Desktop\playafiles"
+# OutputLocation = r"C:\Users\IEUser\Desktop\playafiles\WatershedTest"
 # PlayaPolys = r"C:\Users\IEUser\Desktop\playafiles\PlayaTestIterate.shp"
 # HUC_DEM = r"C:\Users\IEUser\Desktop\playafiles\lidar_huc12_extract1.img"
 
-WorkspaceGBD = "PlayaTemp.gdb"
+# WorkspaceGBD = "PlayaTemp.gdb"
 
 #create a temp file geodatabase to run all processes.
 arcpy.AddMessage("======================================")
 arcpy.AddMessage("Starting playa watershed tool")
 arcpy.AddMessage("======================================")  
-arcpy.AddMessage('Creating temp geodatabase in %s...' % OutputLocation)
-PlayaWorkspace = os.path.join(OutputLocation, WorkspaceGBD)
-if arcpy.Exists(PlayaWorkspace):
-	arcpy.AddMessage("Removing previous temp geodatabase")
-	arcpy.Delete_management(PlayaWorkspace)
-arcpy.CreateFileGDB_management(OutputLocation, WorkspaceGBD)
+#arcpy.AddMessage('Creating temp geodatabase in %s...' % OutputLocation)
+# PlayaWorkspace = os.path.join(OutputLocation, WorkspaceGBD)
+# if arcpy.Exists(PlayaWorkspace):
+# 	arcpy.AddMessage("Removing previous temp geodatabase")
+# 	arcpy.Delete_management(PlayaWorkspace)
+# arcpy.CreateFileGDB_management(OutputLocation, WorkspaceGBD)
 
 #initial environment parameters
-arcpy.env.workspace = PlayaWorkspace
+arcpy.env.workspace = OutputLocation
 arcpy.env.snapRaster = HUC_DEM
 arcpy.env.extent = HUC_DEM
 
@@ -85,31 +84,76 @@ while row:
 	# Process: FlowDirection
 	arcpy.AddMessage("Calculating DEM flow direction...")
 	outFlowDirection = FlowDirection(outFill, "NORMAL", "")
-	outFlowDirection.save("DEM_Filled_flowdir")
+	outFlowDirection.save("Fill_flowdir")
 
 	################
 	
 	#Buffers the playa boundry and converts to raster
 	arcpy.AddMessage("Buffering playa by %s " % (RastCellSize))
 	arcpy.env.extent = ""
-	arcpy.Buffer_analysis(PlayaPolysLayer, "single_playa_poly_buff", RastCellSize, "FULL", "ROUND", "NONE", "")
+	arcpy.Buffer_analysis(PlayaPolysLayer, "single_playa_poly_buff.shp", RastCellSize, "FULL", "ROUND", "NONE", "")
 	arcpy.AddMessage("Creating and rasterizing playa boundary (i.e. pour points)")
-	arcpy.FeatureToLine_management("single_playa_poly_buff", "single_playa_buff_line", "", "ATTRIBUTES")
-	arcpy.PolylineToRaster_conversion("single_playa_buff_line", "Playa_ID", "playa_buff_perim", "MAXIMUM_LENGTH", "NONE", HUC_DEM)
+	arcpy.FeatureToLine_management("single_playa_poly_buff.shp", "single_playa_buff_line.shp", "", "ATTRIBUTES")
+	arcpy.PolylineToRaster_conversion("single_playa_buff_line.shp", "Playa_ID", "buff_perim", "MAXIMUM_LENGTH", "NONE", HUC_DEM)
 
 	#Creates a watershed for playa boundary (pour points) and converts to a vector. 
 	arcpy.AddMessage("Creating watershed from playa pour points")
-	PlayaBoundary = "playa_buff_perim"
-	FlowDir = "DEM_Filled_flowdir"
+	PlayaBoundary = "buff_perim"
+	FlowDir = "Fill_flowdir"
 	arcpy.env.extent = HUC_DEM
-	outWatershed = Watershed( FlowDir, PlayaBoundary, "VALUE")
-	outWatershed.save("Playa_watershed")
-	arcpy.RasterToPolygon_conversion("Playa_watershed", WatershedName, "NO_SIMPLIFY", "VALUE")
+	outWatershed = Watershed(FlowDir, PlayaBoundary, "VALUE")
+	outWatershed.save("watershed")
+	arcpy.RasterToPolygon_conversion("watershed", WatershedName, "NO_SIMPLIFY", "VALUE")
+
+	#calculate volume under polygon
+	# try:
+	# 	arcpy.DeleteField_management(Gulley_Boundary_Polygon, "Volume")
+	# 	arcpy.FeatureToRaster_conversion(Gulley_Boundary_Polygon, "FID", "Gully_Mask_Raster.img", Cellsize)
+
+	# 	#Convert Poly verticies to points, extract raster value to poly points, convert poly to raster
+	# 	arcpy.FeatureVerticesToPoints_management(Gulley_Boundary_Polygon, "Gulley_Boundary_Points.shp", "ALL")
+	# 	ExtractValuesToPoints("Gulley_Boundary_Points.shp", Elevation_Raster, "Gully_Points_with_Elevation.shp", "NONE", "VALUE_ONLY")
+
+	# 	output_tin = OutputLocation + "/Poly_Boundary_Tin"
+	# 	arcpy.CreateTin_3d(output_tin, sr, "Gully_Points_with_Elevation.shp RASTERVALU masspoints", "DELAUNAY")
+
+	# 	#Tin to raster
+	# 	TinRastCellSize = "CELLSIZE " + Cellsize
+	# 	arcpy.TinRaster_3d(output_tin, "cap_raster", "FLOAT", "", TinRastCellSize, "")
+
+	# 	#sets elevation pixels outside of polygon of interest to null.  
+	# 	outElevationraster = SetNull((IsNull("Gully_Mask_Raster.img")), Elevation_Raster)
+	# 	#Ignore pixels with negative depth values
+	# 	outDepthraster = Con("cap_raster" > outElevationraster, "cap_raster" - outElevationraster)
+		
+	# 	#calculates volume above raster, adds output to the poly shp
+	# 	arcpy.SurfaceVolume_3d(outDepthraster, '', 'ABOVE')
+	# 	result = arcpy.GetMessages()
+	# 	volume = float(re.findall(r'Volume= *([\d\.]+)', result)[0])
+	# 	arcpy.AddField_management(Gulley_Boundary_Polygon, "Volume", "FLOAT", "15", "4")
+	# 	arcpy.CalculateField_management(Gulley_Boundary_Polygon, "Volume", float(volume))
+	# 	print volume
+		
+	# 	#cleaning up intermediate files
+	# 	print "cleaning"
+	# 	for filename in ["Gulley_Boundary_Points.shp", "Gully_Mask_Raster.img", "Gully_Points_with_Elevation.shp", outElevationraster, outDepthraster, "cap_raster", output_tin]:
+	# 		if arcpy.Exists(filename):
+	# 			arcpy.Delete_management(filename)
+	# 	arcpy.AddMessage("Done cleaning intermediate files.")
+
+
+	# except arcpy.ExecuteError:
+	# 	print arcpy.GetMessages()
 
 	#calculating and reporting process time
 	arcpy.AddMessage("Watershed created for playa %s, process took %s minutes." % (loopcount, int((time.clock() - t0)/60)))
 	arcpy.AddMessage("Approximately %s minutes remaining." % (int((time.clock() - t0)/60)*(PlayaCount - loopcount)+1))
 	print playaname
+
+	for filename in ["playa_rast", "filled_DEM", "punched_DEM", "Fill_flowdir", "buff_perim"]:
+		if arcpy.Exists(filename):
+			arcpy.Delete_management(filename)
+
 	row = cursor.next()
 
 
@@ -120,22 +164,25 @@ arcpy.AddMessage("Successfully created all %s watersheds." % (PlayaCount))
 arcpy.AddMessage("======================================")
 arcpy.AddMessage("Merging individual watershed polygons into Playa_Watersheds.shp...")  
 datasetList = arcpy.ListFeatureClasses("Shed_*", "Polygon")
-arcpy.Merge_management(datasetList, "Playa_Watersheds")
+arcpy.Merge_management(datasetList, "Playa_Watersheds.shp")
 
 #Adds a field in the merged watershed layer that links back to original Playa ID.
 arcpy.AddMessage("Calculating fields...") 
-arcpy.AddField_management("Playa_Watersheds", "Playa_ID", "SHORT")
-arcpy.CalculateField_management("Playa_Watersheds", "Playa_ID", "!GRIDCODE!", "PYTHON_9.3")
-arcpy.DeleteField_management("Playa_Watersheds", ["GRIDCODE", "ID"])
-arcpy.FeatureClassToShapefile_conversion("Playa_Watersheds", OutputLocation)
+arcpy.AddField_management("Playa_Watersheds.shp", "Playa_ID", "SHORT")
+arcpy.CalculateField_management("Playa_Watersheds.shp", "Playa_ID", "!GRIDCODE!", "PYTHON_9.3")
+arcpy.DeleteField_management("Playa_Watersheds.shp", ["GRIDCODE", "ID"])
+#arcpy.FeatureClassToShapefile_conversion("Playa_Watersheds.shp", OutputLocation)
+
+
 
 #Cleanup: Deletes all uneeded featers from geodatabase
 arcpy.AddMessage("Cleaning up intermediate files...")
-for filename in ["single_playa_poly_buff", "single_playa_buff_line", "playa_buff_perim", "playa_rast", "punched_DEM", "filled_DEM", "DEM_Filled_flowdir", "Playa_watershed"]:
+for filename in ["single_playa_poly_buff.shp", "single_playa_buff_line", "single_playa_buff_line.shp", "playa_buff_perim", "playa_rast", "punched_DEM", "filled_DEM", "DEM_Filled_flowdir", "Playa_watershed", "watershed"]:
 	if arcpy.Exists(filename):
 		arcpy.Delete_management(filename)
 	print "Deleting intermediate files"
-arcpy.Delete_management(PlayaWorkspace)
+for f in datasetList:
+	arcpy.Delete_management(f)
 arcpy.AddMessage("Done cleaning intermediate files.")
 
 arcpy.AddMessage("======================================")
