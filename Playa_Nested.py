@@ -15,18 +15,10 @@ HUC_DEM = arcpy.GetParameterAsText(2)
 # PlayaPolys = r"C:\Users\IEUser\Desktop\playafiles\PlayaTestIterate.shp"
 # HUC_DEM = r"C:\Users\IEUser\Desktop\playafiles\lidar_huc12_extract1.img"
 
-# WorkspaceGBD = "PlayaTemp.gdb"
-
 #create a temp file geodatabase to run all processes.
 arcpy.AddMessage("======================================")
 arcpy.AddMessage("Starting playa watershed tool")
 arcpy.AddMessage("======================================")  
-#arcpy.AddMessage('Creating temp geodatabase in %s...' % OutputLocation)
-# PlayaWorkspace = os.path.join(OutputLocation, WorkspaceGBD)
-# if arcpy.Exists(PlayaWorkspace):
-# 	arcpy.AddMessage("Removing previous temp geodatabase")
-# 	arcpy.Delete_management(PlayaWorkspace)
-# arcpy.CreateFileGDB_management(OutputLocation, WorkspaceGBD)
 
 #initial environment parameters
 arcpy.env.workspace = OutputLocation
@@ -41,10 +33,12 @@ RastCellSize = Cellsize + " Meters"
 sr = arcpy.Describe(HUC_DEM).spatialReference
 loopcount = 0
 
+#make poly shp to feature layer, count records, add fields
 arcpy.MakeFeatureLayer_management(PlayaPolys, PlayaPolysLayer)
-arcpy.AddField_management(PlayaPolysLayer, "Playa_ID", "SHORT")
-
 PlayaCount = int(arcpy.GetCount_management(PlayaPolysLayer).getOutput(0))
+arcpy.DeleteField_management(PlayaPolysLayer, "Volume")
+arcpy.AddField_management(PlayaPolysLayer, "Playa_ID", "SHORT")
+arcpy.AddField_management(PlayaPolysLayer, "Volume", "FLOAT", "15", "4")
 
 #fill DEM
 arcpy.AddMessage("Filling sinks...")
@@ -56,7 +50,6 @@ arcpy.AddMessage("Calculating DEM flow direction...")
 outFlowDirection = FlowDirection(outFill, "NORMAL", "")
 outFlowDirection.save("Fill_flowdir")
 
-arcpy.AddField_management(PlayaPolysLayer, "Volume", "FLOAT", "15", "4")
 
 field = "FID"
 cursor = arcpy.SearchCursor(PlayaPolysLayer)
@@ -74,9 +67,7 @@ while row:
 	arcpy.AddMessage("Creating watershed for playa %s of %s" % (loopcount, PlayaCount))
 	arcpy.AddMessage("======================================")
 
-	
 	query = '"FID" = ' + str(playaID)
-	
 	#Selects iterative rows in the feature layer, converts to raster.
 	arcpy.AddMessage("Rasterizing playas...") 
 	arcpy.SelectLayerByAttribute_management(PlayaPolysLayer, "NEW_SELECTION", query)
@@ -97,13 +88,13 @@ while row:
 	arcpy.AddMessage("Creating and rasterizing playa boundary (i.e. pour points)")
 	arcpy.FeatureToLine_management("single_playa_poly_buff.shp", "single_playa_buff_line.shp", "", "ATTRIBUTES")
 	arcpy.PolylineToRaster_conversion("single_playa_buff_line.shp", "Playa_ID", "buff_perim", "MAXIMUM_LENGTH", "NONE", HUC_DEM)
-
+	
 	#Creates a watershed for playa boundary (pour points) and converts to a vector. 
 	arcpy.AddMessage("Creating watershed from playa pour points")
 	arcpy.env.extent = HUC_DEM
 	outWatershed = Watershed("Fill_flowdir", "buff_perim", "VALUE")
 	outWatershed.save("watershed")
-	arcpy.RasterToPolygon_conversion("watershed", WatershedName, "NO_SIMPLIFY", "VALUE")
+	arcpy.RasterToPolygon_conversion("watershed", WatershedName, "SIMPLIFY", "VALUE")
 
 	###############################
 	#calculate volume under polygon
@@ -114,10 +105,9 @@ while row:
 	arcpy.FeatureVerticesToPoints_management(PlayaPolysLayer, "Gulley_Boundary_Points.shp", "ALL")
 	ExtractValuesToPoints("Gulley_Boundary_Points.shp", HUC_DEM, "Gully_Points_with_Elevation.shp", "NONE", "VALUE_ONLY")
 
+	#create tin, tin to raster
 	output_tin = OutputLocation + "/Poly_Boundary_Tin"
 	arcpy.CreateTin_3d(output_tin, sr, "Gully_Points_with_Elevation.shp RASTERVALU masspoints", "DELAUNAY")
-
-	#Tin to raster
 	TinRastCellSize = "CELLSIZE " + Cellsize
 	arcpy.TinRaster_3d(output_tin, "cap_raster", "FLOAT", "", TinRastCellSize, "")
 
@@ -129,7 +119,6 @@ while row:
 	arcpy.SurfaceVolume_3d(outDepthraster, '', 'ABOVE')
 	result = arcpy.GetMessages()
 	volume = float(re.findall(r'Volume= *([\d\.]+)', result)[0])
-
 	arcpy.CalculateField_management(PlayaPolysLayer, "Volume", volume)
 	arcpy.AddMessage("Playa volume: %s" % (str(volume)))
 	
@@ -144,14 +133,13 @@ while row:
 
 	#calculating and reporting process time
 	arcpy.AddMessage("Watershed created for playa %s, process took %s minutes." % (loopcount, round(float((time.clock() - t0)/60), 2)))
-	arcpy.AddMessage("Approximately %s minutes remaining." % (round(float(((time.clock() - t0)/60)), 1)*(PlayaCount - loopcount)+1))
+	arcpy.AddMessage("Approximately %s minutes remaining." % (round(float(((time.clock() - t0)/60)))*(PlayaCount - loopcount)+1))
 	print playaname
 
 	#cleanup intermediate raster files
 	for filename in ["playa_rast", "punched_DEM", "buff_perim"]:
 		if arcpy.Exists(filename):
 			arcpy.Delete_management(filename)
-
 	row = cursor.next()
 
 #Searches for all individual watershed features and merges them together.
@@ -167,8 +155,6 @@ arcpy.AddMessage("Calculating fields...")
 arcpy.AddField_management("Playa_Watersheds.shp", "Playa_ID", "SHORT")
 arcpy.CalculateField_management("Playa_Watersheds.shp", "Playa_ID", "!GRIDCODE!", "PYTHON_9.3")
 arcpy.DeleteField_management("Playa_Watersheds.shp", ["GRIDCODE", "ID"])
-#arcpy.FeatureClassToShapefile_conversion(PlayaPolysLayer, OutputLocation)
-#arcpy.DeleteFeatures_management(PlayaPolysLayer)
 
 #cleanup all intermediate files
 arcpy.AddMessage("Cleaning up intermediate files...")
