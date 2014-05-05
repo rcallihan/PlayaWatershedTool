@@ -84,7 +84,7 @@ while row:
 	#Buffers the playa boundry and converts to raster
 	arcpy.AddMessage("Buffering playa by %s " % (RastCellSize))
 	arcpy.env.extent = ""
-	arcpy.Buffer_analysis(PlayaPolysLayer, "single_playa_poly_buff.shp", RastCellSize, "FULL", "ROUND", "NONE", "")
+	arcpy.Buffer_analysis(PlayaPolysLayer, "single_playa_poly_buff.shp", (str(float(int(Cellsize) * .90)) + " Meters"), "FULL", "ROUND", "NONE", "")
 	arcpy.AddMessage("Creating and rasterizing playa boundary (i.e. pour points)")
 	arcpy.FeatureToLine_management("single_playa_poly_buff.shp", "single_playa_buff_line.shp", "", "ATTRIBUTES")
 	arcpy.PolylineToRaster_conversion("single_playa_buff_line.shp", "Playa_ID", "buff_perim", "MAXIMUM_LENGTH", "NONE", HUC_DEM)
