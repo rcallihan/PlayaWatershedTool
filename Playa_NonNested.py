@@ -24,6 +24,7 @@ arcpy.env.workspace = OutputLocation
 arcpy.env.snapRaster = HUC_DEM
 arcpy.env.extent = HUC_DEM
 
+
 #HUC_DEM = "lidar_huc12_extract"
 PlayaPolysLayer = "playa_layer"
 loopcount = 0 
@@ -32,7 +33,11 @@ loopcount = 0
 CellSizeResult = arcpy.GetRasterProperties_management(HUC_DEM, "CELLSIZEX")
 Cellsize = CellSizeResult.getOutput(0) 
 RastCellSize = Cellsize + " Meters" 
+RastCellSize_adj = str(float(int(Cellsize) * .90)) + " Meters"
 sr = arcpy.Describe(HUC_DEM).spatialReference
+
+arcpy.AddMessage("Cellsize %s" % (CellSizeResult))
+arcpy.AddMessage("RastCellsize adf %s" % (RastCellSize_adj))
 
 #add volume and playa_Id fields to poly layer.
 arcpy.MakeFeatureLayer_management(PlayaPolys, PlayaPolysLayer)
@@ -42,11 +47,11 @@ arcpy.AddField_management(PlayaPolysLayer, "Volume", "FLOAT", "15", "4")
 arcpy.AddField_management(PlayaPolysLayer, "Playa_ID", "SHORT")
 
 #Buffers the playa boundry and converts to raster
-arcpy.AddMessage("Buffering playa polygons by %s " % (RastCellSize))
-arcpy.Buffer_analysis(PlayaPolysLayer, "single_playa_poly_buff.shp", RastCellSize, "FULL", "ROUND", "NONE", "")
+arcpy.AddMessage("Buffering playa polygons by %s " % (RastCellSize_adj))
+arcpy.Buffer_analysis(PlayaPolysLayer, "single_playa_poly_buff.shp", RastCellSize_adj, "FULL", "ROUND", "NONE", "")
 arcpy.AddMessage("Creating and rasterizing playa boundary (i.e. pour points)")
 arcpy.FeatureToLine_management("single_playa_poly_buff.shp", "single_playa_buff_line.shp", "", "ATTRIBUTES")
-arcpy.PolylineToRaster_conversion("single_playa_buff_line.shp", "FID", "buff_perim", "MAXIMUM_LENGTH", "NONE", HUC_DEM)
+arcpy.PolylineToRaster_conversion("single_playa_buff_line.shp", "FID", "buff_perim", "MAXIMUM_LENGTH", "", CellSizeResult)
 
 #arcpy.env.snapRaster = "lidar_huc12_extract"
 arcpy.env.extent = HUC_DEM
