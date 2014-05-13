@@ -36,9 +36,6 @@ RastCellSize = Cellsize + " Meters"
 RastCellSize_adj = str(float(int(Cellsize) * .90)) + " Meters"
 sr = arcpy.Describe(HUC_DEM).spatialReference
 
-arcpy.AddMessage("Cellsize %s" % (CellSizeResult))
-arcpy.AddMessage("RastCellsize adf %s" % (RastCellSize_adj))
-
 #add volume and playa_Id fields to poly layer.
 arcpy.MakeFeatureLayer_management(PlayaPolys, PlayaPolysLayer)
 PlayaCount = int(arcpy.GetCount_management(PlayaPolysLayer).getOutput(0))
